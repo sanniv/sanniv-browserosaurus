@@ -1,3 +1,19 @@
+> **This is a fork** of the (now retired) upstream Browserosaurus, fixing the
+> long-standing multiple-desktops/Spaces bug
+> ([upstream #595](https://github.com/will-stone/browserosaurus/issues/595)):
+> the picker sliding to a random desktop and instantly vanishing.
+>
+> **Install (Apple Silicon):**
+>
+> ```
+> brew tap sanniv/tap
+> brew install --cask sanniv-browserosaurus
+> ```
+>
+> If you download the zip from Releases manually instead, macOS will report the
+> unsigned app as "damaged" - fix with
+> `xattr -dr com.apple.quarantine /Applications/Browserosaurus.app`.
+
 📣 This project is no longer maintained. Please see my
 [blog post](https://wstone.uk/blog/the-retirement-of-browserosaurus/) for the
 final thoughts on the project. Thank you everyone who has enjoyed using my
