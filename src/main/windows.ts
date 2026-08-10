@@ -1,3 +1,5 @@
+import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -20,6 +22,114 @@ declare const PICKER_WINDOW_VITE_NAME: string
 // Prevents garbage collection
 let pickerWindow: BrowserWindow | null | undefined
 let prefsWindow: BrowserWindow | null | undefined
+
+let pickerShownAt = 0
+
+const debugLogPath = path.join(
+  os.homedir(),
+  'Library/Logs/Browserosaurus.debug.log',
+)
+
+function debugLog(message: string): void {
+  try {
+    fs.appendFileSync(debugLogPath, `${new Date().toISOString()} ${message}\n`)
+  } catch {
+    // Logging must never break the app
+  }
+}
+
+async function createPickerWindow(): Promise<void> {
+  const height = database.get('height')
+
+  pickerWindow = new BrowserWindow({
+    alwaysOnTop: true,
+    center: true,
+    frame: true,
+    fullscreen: false,
+    fullscreenable: false,
+    hasShadow: true,
+    height,
+    icon: path.join(__dirname, '/icon/icon.png'),
+    maximizable: false,
+    maxWidth: 250,
+    minHeight: 112,
+    minimizable: false,
+    minWidth: 250,
+    movable: false,
+    resizable: true,
+    show: false,
+    title: 'Browserosaurus',
+    titleBarStyle: 'hidden',
+    transparent: true,
+    // Non-activating panel: shows on active space without switching
+    type: 'panel',
+    vibrancy: 'popover',
+    visualEffectState: 'active',
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      nodeIntegrationInSubFrames: false,
+      nodeIntegrationInWorker: false,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+    width: 250,
+  })
+
+  pickerWindow.setWindowButtonVisibility(false)
+
+  pickerWindow.setAlwaysOnTop(true, 'screen-saver')
+
+  pickerWindow.setVisibleOnAllWorkspaces(true, {
+    skipTransformProcessType: true,
+    visibleOnFullScreen: true,
+  })
+
+  pickerWindow.on('close', (event_) => {
+    event_.preventDefault()
+    pickerWindow?.hide()
+  })
+
+  pickerWindow.on('resize', () => {
+    if (pickerWindow) {
+      dispatch(changedPickerWindowBounds(pickerWindow.getBounds()))
+    }
+  })
+
+  pickerWindow.on('blur', () => {
+    // A Space-switch animation blurs the window right after show;
+    // hiding then would make the picker flash and vanish (issue #595)
+    if (Date.now() - pickerShownAt < 500) {
+      debugLog('blur ignored (just shown); refocusing')
+      pickerWindow?.focus()
+
+      return
+    }
+
+    pickerWindow?.hide()
+  })
+
+  // A long-lived hidden window keeps a stale Space binding that macOS
+  // swooshes to when the app is activated (issue #595). Recreate the
+  // window after every use so each show starts with no Space binding.
+  pickerWindow.on('hide', () => {
+    debugLog('picker hidden; recreating fresh window')
+    setTimeout(() => {
+      const oldWindow = pickerWindow
+      pickerWindow = undefined
+      oldWindow?.destroy()
+      createPickerWindow()
+    }, 0)
+  })
+
+  await (PICKER_WINDOW_VITE_DEV_SERVER_URL
+    ? pickerWindow.loadURL(PICKER_WINDOW_VITE_DEV_SERVER_URL)
+    : pickerWindow.loadFile(
+        path.join(
+          __dirname,
+          `../renderer/${PICKER_WINDOW_VITE_NAME}/index.html`,
+        ),
+      ))
+}
 
 async function createWindows(): Promise<void> {
   prefsWindow = new BrowserWindow({
@@ -67,84 +177,17 @@ async function createWindows(): Promise<void> {
     dispatch(gotDefaultBrowserStatus(app.isDefaultProtocolClient('http')))
   })
 
-  const height = database.get('height')
-
-  pickerWindow = new BrowserWindow({
-    alwaysOnTop: true,
-    center: true,
-    frame: true,
-    fullscreen: false,
-    fullscreenable: false,
-    hasShadow: true,
-    height,
-    icon: path.join(__dirname, '/icon/icon.png'),
-    maximizable: false,
-    maxWidth: 250,
-    minHeight: 112,
-    minimizable: false,
-    minWidth: 250,
-    movable: false,
-    resizable: true,
-    show: false,
-    title: 'Browserosaurus',
-    titleBarStyle: 'hidden',
-    transparent: true,
-    vibrancy: 'popover',
-    visualEffectState: 'active',
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      nodeIntegrationInSubFrames: false,
-      nodeIntegrationInWorker: false,
-      preload: path.join(__dirname, 'preload.js'),
-    },
-    width: 250,
-  })
-
-  pickerWindow.setWindowButtonVisibility(false)
-
-  pickerWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-
-  pickerWindow.on('hide', () => {
-    pickerWindow?.hide()
-  })
-
-  pickerWindow.on('close', (event_) => {
-    event_.preventDefault()
-    pickerWindow?.hide()
-  })
-
-  pickerWindow.on('resize', () => {
-    if (pickerWindow) {
-      dispatch(changedPickerWindowBounds(pickerWindow.getBounds()))
-    }
-  })
-
-  pickerWindow.on('blur', () => {
-    pickerWindow?.hide()
-  })
-
-  if (PREFS_WINDOW_VITE_DEV_SERVER_URL && PICKER_WINDOW_VITE_DEV_SERVER_URL) {
-    await Promise.all([
-      prefsWindow.loadURL(PREFS_WINDOW_VITE_DEV_SERVER_URL),
-      pickerWindow.loadURL(PICKER_WINDOW_VITE_DEV_SERVER_URL),
-    ])
-  } else {
-    await Promise.all([
-      prefsWindow.loadFile(
-        path.join(
-          __dirname,
-          `../renderer/${PREFS_WINDOW_VITE_NAME}/index.html`,
+  await Promise.all([
+    PREFS_WINDOW_VITE_DEV_SERVER_URL
+      ? prefsWindow.loadURL(PREFS_WINDOW_VITE_DEV_SERVER_URL)
+      : prefsWindow.loadFile(
+          path.join(
+            __dirname,
+            `../renderer/${PREFS_WINDOW_VITE_NAME}/index.html`,
+          ),
         ),
-      ),
-      pickerWindow.loadFile(
-        path.join(
-          __dirname,
-          `../renderer/${PICKER_WINDOW_VITE_NAME}/index.html`,
-        ),
-      ),
-    ])
-  }
+    createPickerWindow(),
+  ])
 }
 
 function showPickerWindow(): void {
@@ -180,7 +223,32 @@ function showPickerWindow(): void {
 
     pickerWindow.setPosition(inWindowPosition.x, inWindowPosition.y, false)
 
+    // macOS drops these after fullscreen transitions; force the native
+    // write by toggling off first (a same-value set can be a no-op)
+    pickerWindow.setVisibleOnAllWorkspaces(false, {
+      skipTransformProcessType: true,
+    })
+    pickerWindow.setAlwaysOnTop(true, 'screen-saver')
+    pickerWindow.setVisibleOnAllWorkspaces(true, {
+      skipTransformProcessType: true,
+      visibleOnFullScreen: true,
+    })
+
+    debugLog(
+      `show picker: visibleOnAllWorkspaces=${pickerWindow.isVisibleOnAllWorkspaces()}`,
+    )
+
+    pickerShownAt = Date.now()
+
     pickerWindow.show()
+  } else {
+    // Window is mid-recreation; retry once so the click isn't lost
+    debugLog('show requested while picker recreating; retrying in 300ms')
+    setTimeout(() => {
+      if (pickerWindow) {
+        showPickerWindow()
+      }
+    }, 300)
   }
 }
 
